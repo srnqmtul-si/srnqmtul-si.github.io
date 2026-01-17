@@ -1,0 +1,123 @@
+import { util } from './util.js';
+import { storage } from './storage.js';
+import { dto } from '../connection/dto.js';
+import { request, HTTP_POST, HTTP_GET, HTTP_STATUS_OK } from '../connection/request.js';
+
+export const session = (() => {
+
+    /**
+     * @type {ReturnType<typeof storage>|null}
+     */
+    let ses = null;
+
+    /**
+     * @returns {string|null}
+     */
+    const getToken = () => ses.get('token');
+
+    /**
+     * @returns {string|null}
+     */
+    const getPrtId = () => ses.get('participant_id');
+
+    /**
+     * @param {string} token
+     * @returns {void}
+     */
+    const setToken = (token) => ses.set('token', token);
+
+    /**
+     * @param {string} prtId
+     * @returns {void}
+     */
+    const setPrtId = (prtId) => ses.set('participant_id', prtId);
+
+    /**
+     * @param {object} body
+     * @returns {Promise<boolean>}
+     */
+    const login = (body) => {
+        return request(HTTP_POST, '/api/session')
+            .body(body)
+            .send(dto.tokenResponse)
+            .then((res) => {
+                if (res.code === HTTP_STATUS_OK) {
+                    setToken(res.data.token);
+                }
+
+                return res.code === HTTP_STATUS_OK;
+            });
+    };
+
+    /**
+     * @returns {void}
+     */
+    const logout = () => ses.unset('token');
+
+    /**
+     * @returns {boolean}
+     */
+    const isAdmin = () => String(getToken() ?? '.').split('.').length === 3;
+
+    /**
+     * @param {string} token
+     * @param {string|null} prtId
+     * @returns {Promise<object>}
+     */
+    const guest = (token, prtId) => {
+        token = token ?? getToken();
+        prtId = prtId ?? getPrtId();
+
+        return request(HTTP_GET, '/api/v2/config')
+            .token(token, prtId)
+            .send()
+            .then((res) => {
+                if (res.code !== HTTP_STATUS_OK) {
+                    throw new Error('failed to get config.');
+                }
+
+                const config = storage('config');
+                for (const [k, v] of Object.entries(res.data)) {
+                    config.set(k, v);
+                }
+
+                setToken(token);
+                setPrtId(prtId);
+                return res;
+            });
+    };
+
+    /**
+     * @returns {object|null}
+     */
+    const decode = () => {
+        if (!isAdmin()) {
+            return null;
+        }
+
+        try {
+            return JSON.parse(util.base64Decode(getToken().split('.')[1]));
+        } catch {
+            return null;
+        }
+    };
+
+    /**
+     * @returns {void}
+     */
+    const init = () => {
+        ses = storage('session');
+    };
+
+    return {
+        init,
+        guest,
+        login,
+        logout,
+        decode,
+        isAdmin,
+        setToken,
+        getToken,
+        getPrtId,
+    };
+})();

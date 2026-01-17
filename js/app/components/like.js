@@ -1,0 +1,144 @@
+import { dto } from '../../connection/dto.js';
+import { session } from '../../common/session.js';
+import { tapTapAnimation } from '../../libs/confetti.js';
+import { request, HTTP_POST, HTTP_DELETE } from '../../connection/request.js';
+
+export const like = (() => {
+
+    /**
+     * @type {Map<string, AbortController>|null}
+     */
+    let listeners = null;
+
+    /**
+     * @param {HTMLButtonElement} button
+     * @returns {Promise<void>}
+     */
+    const love = async (button) => {
+
+        const info = button.firstElementChild;
+        const heart = button.lastElementChild;
+
+        const id = button.getAttribute('data-uuid');
+        const count = parseInt(info.getAttribute('data-count-like'));
+
+        button.disabled = true;
+
+        if (navigator.vibrate) {
+            navigator.vibrate(100);
+        }
+
+        if (button.getAttribute('data-is-like') === 'true') {
+            await request(HTTP_DELETE, '/api/v2/like/' + id)
+                .token(session.getToken(), session.getPrtId())
+                .send(dto.statusResponse)
+                .then((res) => {
+                    if (res.data.status) {
+                        button.setAttribute('data-is-like', 'false');
+
+                        heart.classList.remove('fa-solid', 'text-danger');
+                        heart.classList.add('fa-regular');
+
+                        info.setAttribute('data-count-like', String(count - 1));
+                    }
+                })
+                .finally(() => {
+                    info.innerText = info.getAttribute('data-count-like');
+                    button.disabled = false;
+                });
+        } else {
+            await request(HTTP_POST, '/api/v2/like/' + id)
+                .token(session.getToken(), session.getPrtId())
+                .send(dto.statusResponse)
+                .then((res) => {
+                    if (res.data.status) {
+                        button.setAttribute('data-is-like', 'true');
+
+                        heart.classList.remove('fa-regular');
+                        heart.classList.add('fa-solid', 'text-danger');
+
+                        info.setAttribute('data-count-like', String(count + 1));
+                    }
+                })
+                .finally(() => {
+                    info.innerText = info.getAttribute('data-count-like');
+                    button.disabled = false;
+                });
+        }
+    };
+
+    /**
+     * @param {string} uuid
+     * @returns {HTMLElement|null}
+     */
+    const getButtonLike = (uuid) => {
+        return document.querySelector(`button[onclick="undangan.comment.like.love(this)"][data-uuid="${uuid}"]`);
+    };
+
+    /**
+     * @param {HTMLElement} div
+     * @returns {Promise<void>}
+     */
+    const tapTap = async (div) => {
+        if (!navigator.onLine) {
+            return;
+        }
+
+        const currentTime = Date.now();
+        const tapLength = currentTime - parseInt(div.getAttribute('data-tapTime'));
+        const uuid = div.id.replace('body-content-', '');
+
+        const isTapTap = tapLength < 300 && tapLength > 0;
+        const notLiked = div.getAttribute('data-liked') !== 'true';
+
+        if (isTapTap && notLiked) {
+            tapTapAnimation(div);
+
+            div.setAttribute('data-liked', 'true');
+            await love(getButtonLike(uuid));
+            div.setAttribute('data-liked', 'false');
+        }
+
+        div.setAttribute('data-tapTime', String(currentTime));
+    };
+
+    /**
+     * @param {string} uuid
+     * @returns {void}
+     */
+    const addListener = (uuid) => {
+        const ac = new AbortController();
+
+        const bodyLike = document.getElementById(`body-content-${uuid}`);
+        bodyLike.addEventListener('touchend', () => tapTap(bodyLike), { signal: ac.signal });
+
+        listeners.set(uuid, ac);
+    };
+
+    /**
+     * @param {string} uuid
+     * @returns {void}
+     */
+    const removeListener = (uuid) => {
+        const ac = listeners.get(uuid);
+        if (ac) {
+            ac.abort();
+            listeners.delete(uuid);
+        }
+    };
+
+    /**
+     * @returns {void}
+     */
+    const init = () => {
+        listeners = new Map();
+    };
+
+    return {
+        init,
+        love,
+        getButtonLike,
+        addListener,
+        removeListener,
+    };
+})();
